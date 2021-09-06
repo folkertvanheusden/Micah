@@ -18,7 +18,6 @@ add_executable(
   syzygy.cpp
   tt.cpp
   utils.cpp
-  Fathom/src/tbchess.c
   Fathom/src/tbprobe.c
 )
 

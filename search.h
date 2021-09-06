@@ -32,18 +32,18 @@ int search(libchess::Position & pos, int depth, int alpha, int beta, libchess::M
 void search_it(std::vector<struct ponder_pars *> *td, int me, tt *tti, const int think_time, const int max_depth);
 libchess::Move pick_one(libchess::Position & pos);
 
-result_t lazy_smp_search(tt *tti, int n_threads, libchess::Position & pos, int think_time, int max_depth);
+result_t lazy_smp_search(int cluster_idx, tt *tti, int n_threads, libchess::Position & pos, int think_time, int max_depth);
 
 struct ponder_pars
 {
-	int thread_nr, depth{ 1 };
+	int cluster_idx, thread_nr, depth{ 1 };
 	libchess::Position pos{ 0 };
 	end_indicator_t ei { false };
 	result_t result{ {}, -1, -32767 };
 	std::thread *join_thread;
 	const bool is_ponder;
 
-	ponder_pars(int thread_nr, const libchess::Position & pos, bool is_ponder) : thread_nr(thread_nr), pos(pos), is_ponder(is_ponder) {
+	ponder_pars(const int node_nr, const int thread_nr, const libchess::Position & pos, const bool is_ponder) : cluster_idx(cluster_idx), thread_nr(thread_nr), pos(pos), is_ponder(is_ponder) {
 	}
 };
 std::vector<struct ponder_pars *> * ponder(tt *tti, libchess::Position & pos, int n_threads);

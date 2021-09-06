@@ -127,17 +127,28 @@ void help()
 	printf("-l x   use log file x\n");
 	printf("-x x   use log file tag x\n");
 	printf("-s x   path to Syzygy files\n");
+	printf("-C x   cluster index (0=master)\n");
+	printf("-m x   ip-address of master\n");
 }
 
 int main(int argc, char** argv)
 {
 	std::string syzygy_files;
 	std::string tune_file = "tune.dat", tune_in;
+	std::string master;
 	bool go_ponder = false;
-	int hash_size = 256, n_threads = 1;
+	int hash_size = 256, n_threads = 1, cluster_idx = 0;
 	int c = -1;
-	while((c = getopt(argc, argv, "s:l:c:H:pt:T:x:h")) != -1) {
+	while((c = getopt(argc, argv, "m:C:s:l:c:H:pt:T:x:h")) != -1) {
 		switch(c) {
+			case 'C':
+				cluster_idx = atoi(optarg);
+				break;
+
+			case 'm':
+				master = optarg;
+				break;
+
 			case 's':
 				syzygy_files = optarg;
 				break;
@@ -335,7 +346,7 @@ int main(int argc, char** argv)
 			int think_time = atoi(parts -> at(1).c_str());
 
 			for(;;) {
-				result_t r = lazy_smp_search(&tti, n_threads, *p, think_time, -1);
+				result_t r = lazy_smp_search(0, &tti, n_threads, *p, think_time, -1);
 
 				printf("%s | %s\n", p->fen().c_str(), move_to_str(r.m).c_str());
 
@@ -411,7 +422,10 @@ int main(int argc, char** argv)
 
 			tti.inc_age();
 
-			result_t r = lazy_smp_search(&tti, n_threads, *p, think_time, depth);
+			result_t r = lazy_smp_search(cluster_idx, &tti, n_threads, *p, think_time, depth);
+
+			// TODO: receive results
+			// find result with best values (depth & score)
 
 			if (go_ponder) {
 				pp = ponder(&tti, *p, n_threads);
@@ -431,7 +445,7 @@ int main(int argc, char** argv)
 
 				std::string fen = p->fen();
 
-				result_t r = lazy_smp_search(&ttc, 1, *p, -1, depth);
+				result_t r = lazy_smp_search(0, &ttc, 1, *p, -1, depth);
 
 				p->unmake_move();
 

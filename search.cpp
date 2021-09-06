@@ -208,7 +208,7 @@ int qs(libchess::Position & pos, int alpha, int beta, meta_t *meta, int qsdepth,
 	return best_score;
 }
 
-int search(libchess::Position & pos, int depth, int alpha, int beta, bool is_null_move, meta_t *meta, libchess::Move *const m)
+int search(int cluster_idx, libchess::Position & pos, int depth, int alpha, int beta, bool is_null_move, meta_t *meta, libchess::Move *const m)
 {
 	if (depth == 0)
 		return qs(pos, alpha, beta, meta, 0, m);
@@ -286,12 +286,12 @@ int search(libchess::Position & pos, int depth, int alpha, int beta, bool is_nul
 		pos.make_null_move();
 
 		libchess::Move ignore;
-		int nmscore = -search(pos, depth - nm_reduce_depth, -beta, -beta + 1, true, meta, &ignore);
+		int nmscore = -search(cluster_idx, pos, depth - nm_reduce_depth, -beta, -beta + 1, true, meta, &ignore);
 
 		pos.unmake_move();
 
                 if (nmscore >= beta) {
-			int verification = search(pos, depth - nm_reduce_depth, beta - 1, beta, false, meta, &ignore);
+			int verification = search(cluster_idx, pos, depth - nm_reduce_depth, beta - 1, beta, false, meta, &ignore);
 
 			if (verification >= beta)
 				return beta;
@@ -302,7 +302,7 @@ int search(libchess::Position & pos, int depth, int alpha, int beta, bool is_nul
 	// IID //
 	libchess::Move iid_move;
 	if (!is_null_move && tt_move.value() == 0 && depth >= 2) {
-		if (abs(search(pos, depth - 2, alpha, beta, is_null_move, meta, &iid_move)) > 9800)
+		if (abs(search(cluster_idx, pos, depth - 2, alpha, beta, is_null_move, meta, &iid_move)) > 9800)
 			extension |= 1;
 	}
 	/////////
@@ -322,9 +322,13 @@ int search(libchess::Position & pos, int depth, int alpha, int beta, bool is_nul
 
 	const size_t lmr_start = !in_check && depth >= 2 ? 4 : 999;
 
+	int nr = 0;
 	for(const libchess::Move move : move_list) {
 		if (meta->ei->flag)
 			break;
+
+		if (nr++ < cluster_idx && move_list.size() > cluster_idx)
+			continue;
 
 		pos.make_move(move);
 
@@ -351,14 +355,14 @@ int search(libchess::Position & pos, int depth, int alpha, int beta, bool is_nul
 		if (check_after_move)
 			goto skip_lmr;
 
-		score = -search(pos, new_depth + extension, -beta, -alpha, is_null_move, meta, &curm);
+		score = -search(cluster_idx, pos, new_depth + extension, -beta, -alpha, is_null_move, meta, &curm);
 
 		if (is_lmr && score > alpha) {
 		skip_lmr:
-			score = -search(pos, depth - 1, -beta, -alpha, is_null_move, meta, &curm);
+			score = -search(cluster_idx, pos, depth - 1, -beta, -alpha, is_null_move, meta, &curm);
 		}
 #else
-		score = -search(pos, depth - 1 + extension, -beta, -alpha, is_null_move, meta, &curm);
+		score = -search(cluster_idx, pos, depth - 1 + extension, -beta, -alpha, is_null_move, meta, &curm);
 #endif
 
 		pos.unmake_move();
@@ -480,7 +484,7 @@ void search_it(std::vector<struct ponder_pars *> *td, int me, tt *tti, const int
 			break;
 
 		libchess::Move cur_move;
-		int score = search(td->at(me)->pos, td->at(me)->depth, alpha, beta, false, &meta, &cur_move);
+		int score = search(td->at(me)->cluster_idx, td->at(me)->pos, td->at(me)->depth, alpha, beta, false, &meta, &cur_move);
 
 		if (meta.ei->flag) { // FIXME logging
 			dolog("abort flag set");
@@ -576,12 +580,12 @@ void search_it(std::vector<struct ponder_pars *> *td, int me, tt *tti, const int
 		td->at(me)->result.m = pick_one(td->at(me)->pos);
 }
 
-result_t lazy_smp_search(tt *tti, int n_threads, libchess::Position & pos, int think_time, int max_depth)
+result_t lazy_smp_search(int cluster_idx, tt *tti, int n_threads, libchess::Position & pos, int think_time, int max_depth)
 {
 	std::vector<ponder_pars *> td;
 
 	for(int i=0; i<n_threads; i++)
-		td.push_back(new ponder_pars(i, pos, false));
+		td.push_back(new ponder_pars(cluster_idx, i, pos, false));
 
 	for(int i=0; i<n_threads; i++)
 		td.at(i)->join_thread = new std::thread(search_it, &td, i, tti, think_time, max_depth);
@@ -630,7 +634,7 @@ std::vector<struct ponder_pars *> * ponder(tt *tti, libchess::Position & pos, in
 	std::vector<struct ponder_pars *> *vpp = new std::vector<struct ponder_pars *>;
 
 	for(int i=0; i<n_threads; i++)
-		vpp->push_back(new ponder_pars(i, pos, true));
+		vpp->push_back(new ponder_pars(0, i, pos, true));
 
 	for(int i=0; i<n_threads; i++)
 		vpp->at(i)->join_thread = new std::thread(ponder_search_it_wrapper, tti, vpp, i);

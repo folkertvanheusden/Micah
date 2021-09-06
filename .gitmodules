@@ -1,0 +1,6 @@
+[submodule "libchess"]
+	path = libchess
+	url = https://github.com/Mk-Chan/libchess.git
+[submodule "Fathom"]
+	path = Fathom
+	url = https://github.com/jdart1/Fathom.git

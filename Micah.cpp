@@ -124,18 +124,19 @@ libchess::Position *new_pos()
 	return new libchess::Position(libchess::constants::STARTPOS_FEN);
 }
 
-void cluster_node(tt *const tti, const int n_threads)
+void cluster_node(tt *const tti, const int n_threads, const int port)
 {
 	std::vector<ponder_pars *> *pp = nullptr;
 
 	int fd = socket(AF_INET, SOCK_DGRAM, 0);
 
-	struct sockaddr_in servaddr { 0 };
-	servaddr.sin_family      = AF_INET;
-	servaddr.sin_addr.s_addr = INADDR_ANY;
-	servaddr.sin_port        = htons(CLUSTER_PORT);
+	struct sockaddr_in node_add { 0 };
+	node_add.sin_family      = AF_INET;
+	node_add.sin_addr.s_addr = INADDR_ANY;
+	node_add.sin_port        = htons(port);
 
-	bind(fd, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+	if (bind(fd, (const struct sockaddr *)&node_add, sizeof(node_add)) == -1)
+		printf("# failed bind to [any]:%d %s\n", port, strerror(errno));
 
 	for(;;) {
 		if (pp)
@@ -146,13 +147,15 @@ void cluster_node(tt *const tti, const int n_threads)
 		tti->inc_age();
 
 		struct sockaddr src_addr { 0 };
-		socklen_t addrlen = 0;
+		socklen_t addrlen = sizeof src_addr;
 
 		char buffer[1500];
 		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
 		if (len <= 0)
 			continue;
 		buffer[len] = 0x00;
+
+		printf("# Received request: %s\n", buffer);
 
 		json_error_t error { 0 };
 		json_t *json_in = json_loads(buffer, 0, &error);
@@ -177,7 +180,14 @@ void cluster_node(tt *const tti, const int n_threads)
 		const char *json = json_dumps(json_out, JSON_COMPACT);
 		size_t json_len = strlen(json);
 
-		sendto(fd, json, json_len, MSG_CONFIRM, (const struct sockaddr *)&src_addr, addrlen);
+		const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
+		printf("# send to [%s]:%d: %s\n", inet_ntoa(a->sin_addr), ntohs(a->sin_port), json);
+
+		if (sendto(fd, json, json_len, 0, (const struct sockaddr *)&src_addr, addrlen) == -1) {
+			const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
+
+			printf("# failed transmit to [%s]:%d/%d: %s\n", inet_ntoa(a->sin_addr), ntohs(a->sin_port), addrlen, strerror(errno));
+		}
 
 		free((void *)json);
 
@@ -189,10 +199,12 @@ void cluster_node(tt *const tti, const int n_threads)
 	close(fd);
 }
 
-void cluster_send_requests(const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, const int depth)
+void cluster_send_requests(const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, const int depth)
 {
 	if (nodes == nullptr)
 		return;
+
+	printf("# send request to %zu nodes\n", nodes->size());
 
 	std::string pos = p.fen();
 
@@ -202,8 +214,6 @@ void cluster_send_requests(const std::vector<std::string> *const nodes, const li
 	json_object_set(obj, "depth", json_integer(depth));
 
 	int node_idx = 1;
-
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
 
 	for(auto & node : *nodes) {
 		json_object_set(obj, "idx", json_integer(node_idx++));
@@ -224,14 +234,14 @@ void cluster_send_requests(const std::vector<std::string> *const nodes, const li
 
 		addr.sin_family = AF_INET;
 		addr.sin_port   = htons(port);
-		inet_aton(use_node.c_str(), &addr.sin_addr);
+		if (inet_aton(use_node.c_str(), &addr.sin_addr) == 0)
+			printf("# failed converting address \"%s\": %s\n", use_node.c_str(), strerror(errno));
 
-		sendto(fd, json, json_len, MSG_CONFIRM, (const struct sockaddr *)&addr, sizeof(addr));
+		if (sendto(fd, json, json_len, 0, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
+			printf("# failed transmit to [%s]:%d: %s\n", use_node.c_str(), port, strerror(errno));
 
 		free((void *)json);
 	}
-
-	close(fd);
 
 	json_decref(obj);
 }
@@ -245,13 +255,16 @@ void cluster_receive_results(const int fd, const std::vector<std::string> *const
 
 	for(size_t i=0; i<nodes->size(); i++) {
 		struct sockaddr src_addr { 0 };
-		socklen_t addrlen = 0;
+		socklen_t addrlen = sizeof src_addr;
 
 		char buffer[1500];
-		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, nullptr, nullptr);
+		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
 		if (len <= 0)
 			continue;
 		buffer[len] = 0x00;
+
+		const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
+		printf("# received results from [%s]:%d: %s\n", inet_ntoa(a->sin_addr), ntohs(a->sin_port), buffer);
 
 		json_error_t error { 0 };
 		json_t *json_in = json_loads(buffer, 0, &error);
@@ -300,12 +313,14 @@ int main(int argc, char** argv)
 	int hash_size = 256, n_threads = 1;
 	std::vector<std::string> *nodes = nullptr;
 	bool is_cluster_node = false;
+	int node_port = CLUSTER_PORT;
 	int c = -1;
 
-	while((c = getopt(argc, argv, "Nn:s:l:c:H:pt:T:x:h")) != -1) {
+	while((c = getopt(argc, argv, "N:n:s:l:c:H:pt:T:x:h")) != -1) {
 		switch(c) {
 			case 'N':
 				is_cluster_node = true;
+				node_port = atoi(optarg);
 				break;
 
 			case 'n':
@@ -400,7 +415,7 @@ int main(int argc, char** argv)
 	libchess::Move pp_last_move;
 
 	if (is_cluster_node) {
-		cluster_node(&tti, n_threads);
+		cluster_node(&tti, n_threads, node_port);
 		return 0;
 	}
 
@@ -412,7 +427,8 @@ int main(int argc, char** argv)
 	servaddr.sin_addr.s_addr = INADDR_ANY;
 	servaddr.sin_port        = htons(CLUSTER_PORT);
 
-	bind(fd, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+	if (bind(fd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) == -1)
+		printf("# Failed to bind to port %d: %s\n", ntohs(servaddr.sin_port), strerror(errno));
 
 	for(;;) {
 		char buffer[65536];
@@ -600,7 +616,7 @@ int main(int argc, char** argv)
 
 			tti.inc_age();
 
-			cluster_send_requests(nodes, *p, think_time, depth);
+			cluster_send_requests(fd, nodes, *p, think_time, depth);
 			
 			std::vector<result_t> results;
 
@@ -609,6 +625,8 @@ int main(int argc, char** argv)
 			results.push_back(r);
 
 			cluster_receive_results(fd, nodes, *p, &results);
+
+			printf("# local result: %s (score %d, depth %d)\n", r.m.to_str().c_str(), r.score, r.depth);
 
 			// find result with best values (depth & score)
 			result_t final_r { { }, -1, -32767 };

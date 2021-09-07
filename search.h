@@ -43,7 +43,7 @@ struct ponder_pars
 	std::thread *join_thread;
 	const bool is_ponder;
 
-	ponder_pars(const int node_nr, const int thread_nr, const libchess::Position & pos, const bool is_ponder) : cluster_idx(cluster_idx), thread_nr(thread_nr), pos(pos), is_ponder(is_ponder) {
+	ponder_pars(const int node_nr, const int thread_nr, const libchess::Position & pos, const bool is_ponder) : cluster_idx(node_nr), thread_nr(thread_nr), pos(pos), is_ponder(is_ponder) {
 	}
 };
 std::vector<struct ponder_pars *> * ponder(tt *tti, libchess::Position & pos, int n_threads);

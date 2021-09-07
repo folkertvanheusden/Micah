@@ -10,6 +10,7 @@
 #include <map>
 #include <numeric>
 #include <omp.h>
+#include <poll.h>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -246,16 +247,28 @@ void cluster_send_requests(const int fd, const std::vector<std::string> *const n
 	json_decref(obj);
 }
 
-void cluster_receive_results(const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, std::vector<result_t> *const results)
+void cluster_receive_results(const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, std::vector<result_t> *const results)
 {
 	if (!nodes)
 		return;
+
+	const uint64_t now = get_ts_ms();
+	const uint64_t end = now + (think_time < 0 ? 500 : think_time * 0.1);
+
+	struct pollfd fds[] = { { fd, POLLIN, 0 } };
 
 	std::string compare_pos = p.fen();
 
 	for(size_t i=0; i<nodes->size(); i++) {
 		struct sockaddr src_addr { 0 };
 		socklen_t addrlen = sizeof src_addr;
+
+		int t_left = end - get_ts_ms();
+		int rc = poll(fds, 1, t_left > 0 ? t_left : 0);
+		if (rc == -1) {
+			printf("# poll failed: %s\n", strerror(errno));
+			break;
+		}
 
 		char buffer[1500];
 		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
@@ -624,9 +637,9 @@ int main(int argc, char** argv)
 
 			results.push_back(r);
 
-			cluster_receive_results(fd, nodes, *p, &results);
+			cluster_receive_results(fd, nodes, *p, think_time, &results);
 
-			printf("# local result: %s (score %d, depth %d)\n", r.m.to_str().c_str(), r.score, r.depth);
+			printf("# local result: %s (depth %d, score %d)\n", r.m.to_str().c_str(), r.depth, r.score);
 
 			// find result with best values (depth & score)
 			result_t final_r { { }, -1, -32767 };

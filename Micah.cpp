@@ -211,11 +211,20 @@ void cluster_send_requests(const std::vector<std::string> *const nodes, const li
 		const char *json = json_dumps(obj, JSON_COMPACT);
 		size_t json_len = strlen(json);
 
+		int port = CLUSTER_PORT;
+		std::string use_node = node;
+
+		std::size_t colon = use_node.rfind(':');
+		if (colon != std::string::npos) {
+			port = atoi(use_node.substr(colon + 1).c_str());
+			use_node = use_node.substr(0, colon);
+		}
+
 		struct sockaddr_in addr { 0 };
 
 		addr.sin_family = AF_INET;
-		addr.sin_port   = htons(CLUSTER_PORT);
-		inet_aton(node.c_str(), &addr.sin_addr);
+		addr.sin_port   = htons(port);
+		inet_aton(use_node.c_str(), &addr.sin_addr);
 
 		sendto(fd, json, json_len, MSG_CONFIRM, (const struct sockaddr *)&addr, sizeof(addr));
 

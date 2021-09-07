@@ -25,6 +25,11 @@ target_include_directories(Micah PRIVATE Fathom/src)
 
 include(FindPkgConfig)
 
+pkg_check_modules(JANSSON REQUIRED jansson)
+target_link_libraries(Micah PUBLIC ${JANSSON_LIBRARIES})
+target_include_directories(Micah PUBLIC ${JANSSON_INCLUDE_DIRS})
+target_compile_options(Micah PUBLIC ${JANSSON_CFLAGS_OTHER})
+
 find_package(OpenMP REQUIRED)
 target_link_libraries(Micah PRIVATE OpenMP::OpenMP_CXX)
 

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <jansson.h>
 #include <libgen.h>
 #include <map>
 #include <numeric>
@@ -13,6 +14,10 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include "libchess/Position.h"
 #ifndef __ANDROID__
@@ -25,6 +30,8 @@
 #include "eval_par.h"
 #include "eval.h"
 #include "psq.h"
+
+#define CLUSTER_PORT 5823
 
 bool tune_program(std::string tune_file)
 {
@@ -117,6 +124,151 @@ libchess::Position *new_pos()
 	return new libchess::Position(libchess::constants::STARTPOS_FEN);
 }
 
+void cluster_node(tt *const tti, const int n_threads)
+{
+	std::vector<ponder_pars *> *pp = nullptr;
+
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+	struct sockaddr_in servaddr { 0 };
+	servaddr.sin_family      = AF_INET;
+	servaddr.sin_addr.s_addr = INADDR_ANY;
+	servaddr.sin_port        = htons(CLUSTER_PORT);
+
+	bind(fd, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+
+	for(;;) {
+		if (pp)
+			stop_ponder(pp);
+
+		std::vector<uint64_t> history;
+
+		tti->inc_age();
+
+		struct sockaddr src_addr { 0 };
+		socklen_t addrlen = 0;
+
+		char buffer[1500];
+		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
+		if (len <= 0)
+			continue;
+		buffer[len] = 0x00;
+
+		json_error_t error { 0 };
+		json_t *json_in = json_loads(buffer, 0, &error);
+
+		libchess::Position pos = libchess::Position::from_fen(json_string_value(json_object_get(json_in, "position"))).value();
+		// 90% thinktime to compensate for network etc
+		int think_time = json_integer_value(json_object_get(json_in, "think_time")) * 0.9;
+		int depth = json_integer_value(json_object_get(json_in, "depth"));
+		int cluster_idx = json_integer_value(json_object_get(json_in, "idx"));
+
+		result_t r = lazy_smp_search(cluster_idx, tti, n_threads, pos, think_time, depth);
+
+		json_decref(json_in);
+
+		// send result
+		json_t *json_out = json_object();
+		json_object_set(json_out, "position", json_string(pos.fen().c_str()));
+		json_object_set(json_out, "move", json_string(r.m.to_str().c_str()));
+		json_object_set(json_out, "depth", json_integer(r.depth));
+		json_object_set(json_out, "score", json_integer(r.score));
+
+		const char *json = json_dumps(json_out, JSON_COMPACT);
+		size_t json_len = strlen(json);
+
+		sendto(fd, json, json_len, MSG_CONFIRM, (const struct sockaddr *)&src_addr, addrlen);
+
+		free((void *)json);
+
+		json_decref(json_out);
+
+		pp = ponder(tti, pos, n_threads);
+	}
+
+	close(fd);
+}
+
+void cluster_send_requests(const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, const int depth)
+{
+	if (nodes == nullptr)
+		return;
+
+	std::string pos = p.fen();
+
+	json_t *obj = json_object();
+	json_object_set(obj, "position", json_string(pos.c_str()));
+	json_object_set(obj, "think_time", json_integer(think_time));
+	json_object_set(obj, "depth", json_integer(depth));
+
+	int node_idx = 1;
+
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+	for(auto & node : *nodes) {
+		json_object_set(obj, "idx", json_integer(node_idx++));
+
+		const char *json = json_dumps(obj, JSON_COMPACT);
+		size_t json_len = strlen(json);
+
+		struct sockaddr_in addr { 0 };
+
+		addr.sin_family = AF_INET;
+		addr.sin_port   = htons(CLUSTER_PORT);
+		inet_aton(node.c_str(), &addr.sin_addr);
+
+		sendto(fd, json, json_len, MSG_CONFIRM, (const struct sockaddr *)&addr, sizeof(addr));
+
+		free((void *)json);
+	}
+
+	close(fd);
+
+	json_decref(obj);
+}
+
+void cluster_receive_results(const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, std::vector<result_t> *const results)
+{
+	if (!nodes)
+		return;
+
+	std::string compare_pos = p.fen();
+
+	for(size_t i=0; i<nodes->size(); i++) {
+		struct sockaddr src_addr { 0 };
+		socklen_t addrlen = 0;
+
+		char buffer[1500];
+		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, nullptr, nullptr);
+		if (len <= 0)
+			continue;
+		buffer[len] = 0x00;
+
+		json_error_t error { 0 };
+		json_t *json_in = json_loads(buffer, 0, &error);
+
+		std::string recv_pos = json_string_value(json_object_get(json_in, "position"));
+
+		if (recv_pos == compare_pos) {
+			std::string move = json_string_value(json_object_get(json_in, "move"));
+			int depth = json_integer_value(json_object_get(json_in, "depth"));
+			int score = json_integer_value(json_object_get(json_in, "score"));
+
+			result_t r;
+			r.m     = libchess::Move::from(move).value();
+			r.depth = depth;
+			r.score = score;
+
+			results->push_back(r);
+		}
+		else {
+			fprintf(stderr, "Unexpected FEN\n");
+		}
+
+		json_decref(json_in);
+	}
+}
+
 void help()
 {
 	printf("-H x   size of tt in MB\n");
@@ -127,26 +279,28 @@ void help()
 	printf("-l x   use log file x\n");
 	printf("-x x   use log file tag x\n");
 	printf("-s x   path to Syzygy files\n");
-	printf("-C x   cluster index (0=master)\n");
-	printf("-m x   ip-address of master\n");
+	printf("-n x   nodes\n");
+	printf("-N     is a node\n");
 }
 
 int main(int argc, char** argv)
 {
 	std::string syzygy_files;
 	std::string tune_file = "tune.dat", tune_in;
-	std::string master;
 	bool go_ponder = false;
-	int hash_size = 256, n_threads = 1, cluster_idx = 0;
+	int hash_size = 256, n_threads = 1;
+	std::vector<std::string> *nodes = nullptr;
+	bool is_cluster_node = false;
 	int c = -1;
-	while((c = getopt(argc, argv, "m:C:s:l:c:H:pt:T:x:h")) != -1) {
+
+	while((c = getopt(argc, argv, "Nn:s:l:c:H:pt:T:x:h")) != -1) {
 		switch(c) {
-			case 'C':
-				cluster_idx = atoi(optarg);
+			case 'N':
+				is_cluster_node = true;
 				break;
 
-			case 'm':
-				master = optarg;
+			case 'n':
+				nodes = split(optarg, ",");
 				break;
 
 			case 's':
@@ -235,6 +389,21 @@ int main(int argc, char** argv)
 	std::vector<ponder_pars *> *pp = nullptr;
 	uint64_t pp_start_ts = 0;
 	libchess::Move pp_last_move;
+
+	if (is_cluster_node) {
+		cluster_node(&tti, n_threads);
+		return 0;
+	}
+
+	// cluster port
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+	struct sockaddr_in servaddr { 0 };
+	servaddr.sin_family      = AF_INET;
+	servaddr.sin_addr.s_addr = INADDR_ANY;
+	servaddr.sin_port        = htons(CLUSTER_PORT);
+
+	bind(fd, (const struct sockaddr *)&servaddr, sizeof(servaddr));
 
 	for(;;) {
 		char buffer[65536];
@@ -422,17 +591,33 @@ int main(int argc, char** argv)
 
 			tti.inc_age();
 
-			result_t r = lazy_smp_search(cluster_idx, &tti, n_threads, *p, think_time, depth);
+			cluster_send_requests(nodes, *p, think_time, depth);
+			
+			std::vector<result_t> results;
 
-			// TODO: receive results
+			result_t r = lazy_smp_search(0, &tti, n_threads, *p, think_time, depth);
+
+			results.push_back(r);
+
+			cluster_receive_results(fd, nodes, *p, &results);
+
 			// find result with best values (depth & score)
+			result_t final_r { { }, -1, -32767 };
+
+			for(auto r : results) {
+				if (r.depth >= final_r.depth && r.score >= final_r.score) {
+					final_r.depth = r.depth;
+					final_r.score = r.score;
+					final_r.m     = r.m;
+				}
+			}
+
+			printf("bestmove %s\n", move_to_str(final_r.m).c_str());
 
 			if (go_ponder) {
 				pp = ponder(&tti, *p, n_threads);
 				pp_start_ts = get_ts_ms();
 			}
-
-			printf("bestmove %s\n", move_to_str(r.m).c_str());
 		}
 		/////
 		else if (parts->at(0) == "sdiv" && parts->size() == 2) {

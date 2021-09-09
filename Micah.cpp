@@ -138,7 +138,7 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 	node_add.sin_port        = htons(port);
 
 	if (bind(fd, (const struct sockaddr *)&node_add, sizeof(node_add)) == -1)
-		printf("# failed bind to [any]:%d %s\n", port, strerror(errno));
+		dolog("failed bind to [any]:%d %s", port, strerror(errno));
 
 	for(;;) {
 		if (pp)
@@ -157,7 +157,7 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 			continue;
 		buffer[len] = 0x00;
 
-		printf("# Received request: %s\n", buffer);
+		dolog("Received request: %s", buffer);
 
 		json_error_t error { 0 };
 		json_t *json_in = json_loads(buffer, 0, &error);
@@ -183,12 +183,12 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 		size_t json_len = strlen(json);
 
 		const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
-		printf("# send to [%s]:%d: %s\n", inet_ntoa(a->sin_addr), ntohs(a->sin_port), json);
+		dolog("send to [%s]:%d: %s", inet_ntoa(a->sin_addr), ntohs(a->sin_port), json);
 
 		if (sendto(fd, json, json_len, 0, (const struct sockaddr *)&src_addr, addrlen) == -1) {
 			const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
 
-			printf("# failed transmit to [%s]:%d/%d: %s\n", inet_ntoa(a->sin_addr), ntohs(a->sin_port), addrlen, strerror(errno));
+			dolog("failed transmit to [%s]:%d/%d: %s", inet_ntoa(a->sin_addr), ntohs(a->sin_port), addrlen, strerror(errno));
 		}
 
 		free((void *)json);
@@ -206,7 +206,7 @@ void cluster_send_requests(const int fd, const std::vector<std::string> *const n
 	if (nodes == nullptr)
 		return;
 
-	printf("# send request to %zu nodes\n", nodes->size());
+	dolog("send request to %zu nodes", nodes->size());
 
 	std::string pos = p.fen();
 
@@ -239,14 +239,14 @@ void cluster_send_requests(const int fd, const std::vector<std::string> *const n
 
 		struct hostent *he = gethostbyname(use_node.c_str());
 		if (!he) {
-			printf("# failed converting address \"%s\": %s\n", use_node.c_str(), strerror(errno));
+			dolog("failed converting address \"%s\": %s", use_node.c_str(), strerror(errno));
 			continue;
 		}
 
 		memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
 
 		if (sendto(fd, json, json_len, 0, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
-			printf("# failed transmit to [%s]:%d: %s\n", use_node.c_str(), port, strerror(errno));
+			dolog("failed transmit to [%s]:%d: %s", use_node.c_str(), port, strerror(errno));
 
 		free((void *)json);
 	}
@@ -273,7 +273,7 @@ void cluster_receive_results(const int fd, const std::vector<std::string> *const
 		int t_left = end - get_ts_ms();
 		int rc = poll(fds, 1, t_left > 0 ? t_left : 0);
 		if (rc == -1) {
-			printf("# poll failed: %s\n", strerror(errno));
+			dolog("poll failed: %s", strerror(errno));
 			break;
 		}
 
@@ -284,7 +284,7 @@ void cluster_receive_results(const int fd, const std::vector<std::string> *const
 		buffer[len] = 0x00;
 
 		const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
-		printf("# received results from [%s]:%d: %s\n", inet_ntoa(a->sin_addr), ntohs(a->sin_port), buffer);
+		dolog("received results from [%s]:%d: %s", inet_ntoa(a->sin_addr), ntohs(a->sin_port), buffer);
 
 		json_error_t error { 0 };
 		json_t *json_in = json_loads(buffer, 0, &error);
@@ -424,7 +424,7 @@ int main(int argc, char** argv)
 	if (!syzygy_files.empty()) {
 		tb_init(syzygy_files.c_str());
 
-		printf("# %d men syzygy\n", TB_LARGEST);
+		dolog("%d men syzygy", TB_LARGEST);
 	}
 
 	tt tti(hash_size * 1024ll * 1024ll);
@@ -448,7 +448,7 @@ int main(int argc, char** argv)
 	servaddr.sin_port        = htons(CLUSTER_PORT);
 
 	if (bind(fd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) == -1)
-		printf("# Failed to bind to port %d: %s\n", ntohs(servaddr.sin_port), strerror(errno));
+		dolog("Failed to bind to port %d: %s", ntohs(servaddr.sin_port), strerror(errno));
 
 	for(;;) {
 		char buffer[65536];
@@ -641,7 +641,7 @@ int main(int argc, char** argv)
 			std::vector<result_t> results;
 
 			result_t r = lazy_smp_search(0, &tti, n_threads, *p, think_time, depth);
-			printf("# local result: %s (depth %d, score %d)\n", r.m.to_str().c_str(), r.depth, r.score);
+			dolog("local result: %s (depth %d, score %d)", r.m.to_str().c_str(), r.depth, r.score);
 			results.push_back(r);
 
 			cluster_receive_results(fd, nodes, *p, think_time, &results);
@@ -658,6 +658,7 @@ int main(int argc, char** argv)
 			}
 
 			printf("bestmove %s\n", move_to_str(final_r.m).c_str());
+			dolog("bestmove %s", move_to_str(final_r.m).c_str());
 
 			if (go_ponder) {
 				pp = ponder(&tti, *p, n_threads);

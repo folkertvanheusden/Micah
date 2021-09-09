@@ -254,13 +254,13 @@ void cluster_send_requests(const int fd, const std::vector<std::string> *const n
 	json_decref(obj);
 }
 
-void cluster_receive_results(const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, std::vector<result_t> *const results)
+void cluster_receive_results(const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, const int wait_time, std::vector<result_t> *const results)
 {
 	if (!nodes)
 		return;
 
 	const uint64_t now = get_ts_ms();
-	const uint64_t end = now + (think_time < 0 ? 500 : think_time * 0.1);
+	const uint64_t end = now + (wait_time < 0 ? 100 : wait_time);
 
 	struct pollfd fds[] = { { fd, POLLIN, 0 } };
 
@@ -323,6 +323,7 @@ void help()
 	printf("-s x   path to Syzygy files\n");
 	printf("-n x   nodes\n");
 	printf("-N x   is a node (listening on (UDP) port x)\n");
+	printf("-L     also calculate with local CPU\n");
 }
 
 int main(int argc, char** argv)
@@ -334,10 +335,15 @@ int main(int argc, char** argv)
 	std::vector<std::string> *nodes = nullptr;
 	bool is_cluster_node = false;
 	int node_port = CLUSTER_PORT;
+	bool include_local = false;
 	int c = -1;
 
-	while((c = getopt(argc, argv, "N:n:s:l:c:H:pt:T:x:h")) != -1) {
+	while((c = getopt(argc, argv, "N:n:s:l:c:H:pt:T:x:Lh")) != -1) {
 		switch(c) {
+			case 'L':
+				include_local = true;
+				break;
+
 			case 'N':
 				is_cluster_node = true;
 				node_port = atoi(optarg);
@@ -640,25 +646,32 @@ int main(int argc, char** argv)
 			
 			std::vector<result_t> results;
 
-			result_t r = lazy_smp_search(0, &tti, n_threads, *p, think_time, depth);
-			dolog("local result: %s (depth %d, score %d)", r.m.to_str().c_str(), r.depth, r.score);
-			results.push_back(r);
+			if (include_local) {
+				result_t r = lazy_smp_search(0, &tti, n_threads, *p, think_time, depth);
+				dolog("local result: %s (depth %d, score %d)", r.m.to_str().c_str(), r.depth, r.score);
+				results.push_back(r);
 
-			cluster_receive_results(fd, nodes, *p, think_time, &results);
+				cluster_receive_results(fd, nodes, *p, think_time * 0.1, &results);
+			}
+			else {
+				cluster_receive_results(fd, nodes, *p, think_time, &results);
+			}
 
 			// find result with best values (depth & score)
 			result_t final_r { { }, -1, -32767 };
 
-			for(auto r : results) {
-				if (r.depth >= final_r.depth && r.score >= final_r.score) {
-					final_r.depth = r.depth;
-					final_r.score = r.score;
-					final_r.m     = r.m;
+			size_t chosen = 0;
+			for(size_t i=0; i<results.size(); i++) {
+				if (results.at(i).depth >= final_r.depth && results.at(i).score >= final_r.score) {
+					final_r.depth = results.at(i).depth;
+					final_r.score = results.at(i).score;
+					final_r.m     = results.at(i).m;
+					chosen = i;
 				}
 			}
 
 			printf("bestmove %s\n", move_to_str(final_r.m).c_str());
-			dolog("bestmove %s", move_to_str(final_r.m).c_str());
+			dolog("bestmove %s (idx: %zu, depth: %d, score: %d)", move_to_str(final_r.m).c_str(), chosen, final_r.depth, final_r.score);
 
 			if (go_ponder) {
 				pp = ponder(&tti, *p, n_threads);

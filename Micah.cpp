@@ -8,6 +8,7 @@
 #include <jansson.h>
 #include <libgen.h>
 #include <map>
+#include <netdb.h>
 #include <numeric>
 #include <omp.h>
 #include <poll.h>
@@ -235,8 +236,14 @@ void cluster_send_requests(const int fd, const std::vector<std::string> *const n
 
 		addr.sin_family = AF_INET;
 		addr.sin_port   = htons(port);
-		if (inet_aton(use_node.c_str(), &addr.sin_addr) == 0)
+
+		struct hostent *he = gethostbyname(use_node.c_str());
+		if (!he) {
 			printf("# failed converting address \"%s\": %s\n", use_node.c_str(), strerror(errno));
+			continue;
+		}
+
+		memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
 
 		if (sendto(fd, json, json_len, 0, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
 			printf("# failed transmit to [%s]:%d: %s\n", use_node.c_str(), port, strerror(errno));
@@ -315,7 +322,7 @@ void help()
 	printf("-x x   use log file tag x\n");
 	printf("-s x   path to Syzygy files\n");
 	printf("-n x   nodes\n");
-	printf("-N     is a node\n");
+	printf("-N x   is a node (listening on (UDP) port x)\n");
 }
 
 int main(int argc, char** argv)
@@ -634,12 +641,10 @@ int main(int argc, char** argv)
 			std::vector<result_t> results;
 
 			result_t r = lazy_smp_search(0, &tti, n_threads, *p, think_time, depth);
-
+			printf("# local result: %s (depth %d, score %d)\n", r.m.to_str().c_str(), r.depth, r.score);
 			results.push_back(r);
 
 			cluster_receive_results(fd, nodes, *p, think_time, &results);
-
-			printf("# local result: %s (depth %d, score %d)\n", r.m.to_str().c_str(), r.depth, r.score);
 
 			// find result with best values (depth & score)
 			result_t final_r { { }, -1, -32767 };

@@ -201,7 +201,7 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 	close(fd);
 }
 
-void cluster_send_requests(const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, const int depth)
+void cluster_send_requests(const bool include_local, const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, const int depth)
 {
 	if (nodes == nullptr)
 		return;
@@ -215,7 +215,7 @@ void cluster_send_requests(const int fd, const std::vector<std::string> *const n
 	json_object_set(obj, "think_time", json_integer(think_time));
 	json_object_set(obj, "depth", json_integer(depth));
 
-	int node_idx = 1;
+	int node_idx = include_local ? 1 : 0;
 
 	for(auto & node : *nodes) {
 		json_object_set(obj, "idx", json_integer(node_idx++));
@@ -642,7 +642,7 @@ int main(int argc, char** argv)
 
 			tti.inc_age();
 
-			cluster_send_requests(fd, nodes, *p, think_time, depth);
+			cluster_send_requests(include_local, fd, nodes, *p, think_time, depth);
 			
 			std::vector<result_t> results;
 

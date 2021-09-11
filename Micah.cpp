@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <vector>
 #include <arpa/inet.h>
+#include <boost/mpi.hpp>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -33,7 +34,8 @@
 #include "eval.h"
 #include "psq.h"
 
-#define CLUSTER_PORT 5823
+namespace mpi = boost::mpi;
+constexpr int mpi_tag = 9;
 
 bool tune_program(std::string tune_file)
 {
@@ -126,21 +128,16 @@ libchess::Position *new_pos()
 	return new libchess::Position(libchess::constants::STARTPOS_FEN);
 }
 
-void cluster_node(tt *const tti, const int n_threads, const int port)
+void cluster_node(mpi::communicator & world, tt *const tti, const int n_threads)
 {
 	std::vector<ponder_pars *> *pp = nullptr;
 
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
-
-	struct sockaddr_in node_add { 0 };
-	node_add.sin_family      = AF_INET;
-	node_add.sin_addr.s_addr = INADDR_ANY;
-	node_add.sin_port        = htons(port);
-
-	if (bind(fd, (const struct sockaddr *)&node_add, sizeof(node_add)) == -1)
-		dolog("failed bind to [any]:%d %s", port, strerror(errno));
+	dolog("node %d out of %d", world.rank(), world.size());
 
 	for(;;) {
+		std::string data;
+		world.recv(0, mpi_tag, data);
+
 		if (pp)
 			stop_ponder(pp);
 
@@ -148,19 +145,10 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 
 		tti->inc_age();
 
-		struct sockaddr src_addr { 0 };
-		socklen_t addrlen = sizeof src_addr;
-
-		char buffer[1500];
-		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
-		if (len <= 0)
-			continue;
-		buffer[len] = 0x00;
-
-		dolog("Received request: %s", buffer);
+		dolog("Received request: %s", data.c_str());
 
 		json_error_t error { 0 };
-		json_t *json_in = json_loads(buffer, 0, &error);
+		json_t *json_in = json_loads(data.c_str(), 0, &error);
 
 		libchess::Position pos = libchess::Position::from_fen(json_string_value(json_object_get(json_in, "position"))).value();
 		// 90% thinktime to compensate for network etc
@@ -180,28 +168,18 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 		json_object_set(json_out, "score", json_integer(r.score));
 
 		const char *json = json_dumps(json_out, JSON_COMPACT);
-		size_t json_len = strlen(json);
-
-		const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
-		dolog("send to [%s]:%d: %s", inet_ntoa(a->sin_addr), ntohs(a->sin_port), json);
-
-		if (sendto(fd, json, json_len, 0, (const struct sockaddr *)&src_addr, addrlen) == -1) {
-			const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
-
-			dolog("failed transmit to [%s]:%d/%d: %s", inet_ntoa(a->sin_addr), ntohs(a->sin_port), addrlen, strerror(errno));
-		}
-
+		std::string json_str = json;
 		free((void *)json);
 
 		json_decref(json_out);
 
+		world.send(0, mpi_tag, json_str);
+
 		pp = ponder(tti, pos, n_threads);
 	}
-
-	close(fd);
 }
 
-void cluster_send_requests(const bool include_local, const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, const int depth)
+void cluster_send_requests(mpi::communicator & world, const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, const int depth)
 {
 	if (nodes == nullptr)
 		return;
@@ -215,79 +193,24 @@ void cluster_send_requests(const bool include_local, const int fd, const std::ve
 	json_object_set(obj, "think_time", json_integer(think_time));
 	json_object_set(obj, "depth", json_integer(depth));
 
-	int node_idx = include_local ? 1 : 0;
-
-	for(auto & node : *nodes) {
-		json_object_set(obj, "idx", json_integer(node_idx++));
-
-		const char *json = json_dumps(obj, JSON_COMPACT);
-		size_t json_len = strlen(json);
-
-		int port = CLUSTER_PORT;
-		std::string use_node = node;
-
-		std::size_t colon = use_node.rfind(':');
-		if (colon != std::string::npos) {
-			port = atoi(use_node.substr(colon + 1).c_str());
-			use_node = use_node.substr(0, colon);
-		}
-
-		struct sockaddr_in addr { 0 };
-
-		addr.sin_family = AF_INET;
-		addr.sin_port   = htons(port);
-
-		struct hostent *he = gethostbyname(use_node.c_str());
-		if (!he) {
-			dolog("failed converting address \"%s\": %s", use_node.c_str(), strerror(errno));
-			continue;
-		}
-
-		memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
-
-		if (sendto(fd, json, json_len, 0, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
-			dolog("failed transmit to [%s]:%d: %s", use_node.c_str(), port, strerror(errno));
-
-		free((void *)json);
-	}
-
+	const char *json = json_dumps(obj, JSON_COMPACT);
+	std::string json_str = json;
+	free((void *)json);
 	json_decref(obj);
+
+	broadcast(world, json_str, mpi_tag);
 }
 
-void cluster_receive_results(const int fd, const std::vector<std::string> *const nodes, const libchess::Position & p, const int wait_time, std::vector<result_t> *const results)
+void cluster_receive_results(mpi::communicator & world, const libchess::Position & p, std::vector<result_t> *const results)
 {
-	if (!nodes)
-		return;
-
-	const uint64_t now = get_ts_ms();
-	const uint64_t end = now + (wait_time < 0 ? 100 : wait_time);
-
-	struct pollfd fds[] = { { fd, POLLIN, 0 } };
-
 	std::string compare_pos = p.fen();
 
-	for(size_t i=0; i<nodes->size(); i++) {
-		struct sockaddr src_addr { 0 };
-		socklen_t addrlen = sizeof src_addr;
-
-		int t_left = end - get_ts_ms();
-		int rc = poll(fds, 1, t_left > 0 ? t_left : 0);
-		if (rc == -1) {
-			dolog("poll failed: %s", strerror(errno));
-			break;
-		}
-
-		char buffer[1500];
-		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
-		if (len <= 0)
-			continue;
-		buffer[len] = 0x00;
-
-		const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
-		dolog("received results from [%s]:%d: %s", inet_ntoa(a->sin_addr), ntohs(a->sin_port), buffer);
+	for(int i=0; i<world.size() - 1; i++) {
+		std::string buffer;
+		world.recv(mpi::any_source, mpi_tag, buffer);
 
 		json_error_t error { 0 };
-		json_t *json_in = json_loads(buffer, 0, &error);
+		json_t *json_in = json_loads(buffer.c_str(), 0, &error);
 
 		std::string recv_pos = json_string_value(json_object_get(json_in, "position"));
 
@@ -334,23 +257,13 @@ int main(int argc, char** argv)
 	int hash_size = 256, n_threads = 1;
 	std::vector<std::string> *nodes = nullptr;
 	bool is_cluster_node = false;
-	int node_port = CLUSTER_PORT;
 	bool include_local = false;
 	int c = -1;
 
-	while((c = getopt(argc, argv, "N:n:s:l:c:H:pt:T:x:Lh")) != -1) {
+	while((c = getopt(argc, argv, "s:l:c:H:pt:T:x:Lh")) != -1) {
 		switch(c) {
 			case 'L':
 				include_local = true;
-				break;
-
-			case 'N':
-				is_cluster_node = true;
-				node_port = atoi(optarg);
-				break;
-
-			case 'n':
-				nodes = split(optarg, ",");
 				break;
 
 			case 's':
@@ -440,21 +353,13 @@ int main(int argc, char** argv)
 	uint64_t pp_start_ts = 0;
 	libchess::Move pp_last_move;
 
-	if (is_cluster_node) {
-		cluster_node(&tti, n_threads, node_port);
+	mpi::environment env;
+	mpi::communicator world;
+
+	if (world.rank()) {
+		cluster_node(world, &tti, n_threads);
 		return 0;
 	}
-
-	// cluster port
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
-
-	struct sockaddr_in servaddr { 0 };
-	servaddr.sin_family      = AF_INET;
-	servaddr.sin_addr.s_addr = INADDR_ANY;
-	servaddr.sin_port        = htons(CLUSTER_PORT);
-
-	if (bind(fd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) == -1)
-		dolog("Failed to bind to port %d: %s", ntohs(servaddr.sin_port), strerror(errno));
 
 	for(;;) {
 		char buffer[65536];
@@ -642,7 +547,7 @@ int main(int argc, char** argv)
 
 			tti.inc_age();
 
-			cluster_send_requests(include_local, fd, nodes, *p, think_time, depth);
+			cluster_send_requests(world, nodes, *p, think_time, depth);
 			
 			std::vector<result_t> results;
 
@@ -651,10 +556,10 @@ int main(int argc, char** argv)
 				dolog("local result: %s (depth %d, score %d)", r.m.to_str().c_str(), r.depth, r.score);
 				results.push_back(r);
 
-				cluster_receive_results(fd, nodes, *p, think_time * 0.1, &results);
+//				cluster_receive_results(world, nodes, *p, think_time * 0.1, &results);
 			}
 			else {
-				cluster_receive_results(fd, nodes, *p, think_time, &results);
+//				cluster_receive_results(world, nodes, *p, think_time, &results);
 			}
 
 			// find result with best values (depth & score)

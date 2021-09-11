@@ -33,4 +33,8 @@ target_compile_options(Micah PUBLIC ${JANSSON_CFLAGS_OTHER})
 find_package(OpenMP REQUIRED)
 target_link_libraries(Micah PRIVATE OpenMP::OpenMP_CXX)
 
+FIND_PACKAGE(Boost 1.4 COMPONENTS mpi REQUIRED)
+INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(Micah PRIVATE ${Boost_LIBRARIES})
+
 set_target_properties(Micah PROPERTIES OUTPUT_NAME Micah)

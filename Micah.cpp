@@ -190,16 +190,21 @@ void cluster_send_requests(mpi::communicator & world, const libchess::Position &
 	json_object_set(obj, "think_time", json_integer(think_time));
 	json_object_set(obj, "depth", json_integer(depth));
 
-	const char *json = json_dumps(obj, JSON_COMPACT);
-	std::string json_str = json;
-	free((void *)json);
-	json_decref(obj);
+	dolog("Send request to %d nodes", world.size());
 
-	dolog("Send request to %d nodes: %s", world.size(), json_str.c_str());
+	for(int i=1; i<world.size(); i++) {
+		json_object_set(obj, "idx", json_integer(i));
 
-	for(int i=1; i<world.size(); i++)
+		const char *json = json_dumps(obj, JSON_COMPACT);
+		std::string json_str = json;
+		free((void *)json);
+
 		world.send(i, mpi_tag, json_str);
-//	broadcast(world, json_str, mpi_tag);
+	}
+
+//	broadcast(world, json_str, mpi_tag); FIXME
+
+	json_decref(obj);
 }
 
 void cluster_receive_results(mpi::communicator & world, const libchess::Position & p, std::vector<result_t> *const results)
@@ -546,7 +551,7 @@ int main(int argc, char** argv)
 
 			tti.inc_age();
 
-			cluster_send_requests(world, *p, think_time, depth);
+			cluster_send_requests(world, *p, think_time * 0.9, depth);
 			
 			std::vector<result_t> results;
 

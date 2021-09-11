@@ -287,13 +287,13 @@ int main(int argc, char** argv)
 			for(size_t i=1; i<parts->size();) {
 				if (parts->at(i) == "fen") {
 					std::string fen;
-					for(size_t f = i + 1; f<parts->size(); f++)
+					for(size_t f = i + 1; f<std::min(i + 7, parts->size()); f++)
 						fen += parts->at(f) + " ";
 
 					delete p;
 					p = new libchess::Position(fen);
 
-					break;
+					i += 7;
 				}
 				else if (parts->at(i) == "startpos") {
 					delete p;

@@ -173,19 +173,16 @@ void cluster_node(mpi::communicator & world, tt *const tti, const int n_threads)
 
 		json_decref(json_out);
 
+		dolog("Sending reply: %s", json_str.c_str());
+
 		world.send(0, mpi_tag, json_str);
 
 		pp = ponder(tti, pos, n_threads);
 	}
 }
 
-void cluster_send_requests(mpi::communicator & world, const std::vector<std::string> *const nodes, const libchess::Position & p, const int think_time, const int depth)
+void cluster_send_requests(mpi::communicator & world, const libchess::Position & p, const int think_time, const int depth)
 {
-	if (nodes == nullptr)
-		return;
-
-	dolog("send request to %zu nodes", nodes->size());
-
 	std::string pos = p.fen();
 
 	json_t *obj = json_object();
@@ -198,16 +195,26 @@ void cluster_send_requests(mpi::communicator & world, const std::vector<std::str
 	free((void *)json);
 	json_decref(obj);
 
-	broadcast(world, json_str, mpi_tag);
+	dolog("Send request to %d nodes: %s", world.size(), json_str.c_str());
+
+	for(int i=1; i<world.size(); i++)
+		world.send(i, mpi_tag, json_str);
+//	broadcast(world, json_str, mpi_tag);
 }
 
 void cluster_receive_results(mpi::communicator & world, const libchess::Position & p, std::vector<result_t> *const results)
 {
 	std::string compare_pos = p.fen();
 
+	dolog("Waiting for %d replies", world.size());
+
+	// FIXME use std::vector<int> all_numbers; gather(world, my_number, all_numbers, 0);
+
 	for(int i=0; i<world.size() - 1; i++) {
 		std::string buffer;
 		world.recv(mpi::any_source, mpi_tag, buffer);
+
+		dolog("Received %d: %s", i, buffer.c_str());
 
 		json_error_t error { 0 };
 		json_t *json_in = json_loads(buffer.c_str(), 0, &error);
@@ -241,11 +248,7 @@ void help()
 	printf("-c x   number of threads\n");
 	printf("-t x   tune using fen-file x\n");
 	printf("-T x   while playing, tune program with file x (generated using -t)\n");
-	printf("-l x   use log file x\n");
-	printf("-x x   use log file tag x\n");
 	printf("-s x   path to Syzygy files\n");
-	printf("-n x   nodes\n");
-	printf("-N x   is a node (listening on (UDP) port x)\n");
 	printf("-L     also calculate with local CPU\n");
 }
 
@@ -255,12 +258,11 @@ int main(int argc, char** argv)
 	std::string tune_file = "tune.dat", tune_in;
 	bool go_ponder = false;
 	int hash_size = 256, n_threads = 1;
-	std::vector<std::string> *nodes = nullptr;
 	bool is_cluster_node = false;
 	bool include_local = false;
 	int c = -1;
 
-	while((c = getopt(argc, argv, "s:l:c:H:pt:T:x:Lh")) != -1) {
+	while((c = getopt(argc, argv, "s:c:H:pt:T:Lh")) != -1) {
 		switch(c) {
 			case 'L':
 				include_local = true;
@@ -268,14 +270,6 @@ int main(int argc, char** argv)
 
 			case 's':
 				syzygy_files = optarg;
-				break;
-
-			case 'l':
-				set_logfile(optarg);
-				break;
-
-			case 'x':
-				set_logfile_tag(optarg);
 				break;
 
 			case 'c':
@@ -307,6 +301,12 @@ int main(int argc, char** argv)
 				return 1;
 		}
 	}
+
+	mpi::environment env;
+	mpi::communicator world;
+
+	std::string world_log = myformat("%d.log", world.rank());
+	set_logfile(world_log.c_str());
 
 #ifndef __ANDROID__
 	omp_set_num_threads(n_threads);
@@ -353,13 +353,12 @@ int main(int argc, char** argv)
 	uint64_t pp_start_ts = 0;
 	libchess::Move pp_last_move;
 
-	mpi::environment env;
-	mpi::communicator world;
-
 	if (world.rank()) {
 		cluster_node(world, &tti, n_threads);
 		return 0;
 	}
+
+	dolog("running as master");
 
 	for(;;) {
 		char buffer[65536];
@@ -547,7 +546,7 @@ int main(int argc, char** argv)
 
 			tti.inc_age();
 
-			cluster_send_requests(world, nodes, *p, think_time, depth);
+			cluster_send_requests(world, *p, think_time, depth);
 			
 			std::vector<result_t> results;
 
@@ -555,12 +554,9 @@ int main(int argc, char** argv)
 				result_t r = lazy_smp_search(0, &tti, n_threads, *p, think_time, depth);
 				dolog("local result: %s (depth %d, score %d)", r.m.to_str().c_str(), r.depth, r.score);
 				results.push_back(r);
+			}
 
-//				cluster_receive_results(world, nodes, *p, think_time * 0.1, &results);
-			}
-			else {
-//				cluster_receive_results(world, nodes, *p, think_time, &results);
-			}
+			cluster_receive_results(world, *p, &results);
 
 			// find result with best values (depth & score)
 			result_t final_r { { }, -1, -32767 };

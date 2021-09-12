@@ -141,9 +141,6 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 		dolog("failed bind to [any]:%d %s", port, strerror(errno));
 
 	for(;;) {
-		if (pp)
-			stop_ponder(pp);
-
 		std::vector<uint64_t> history;
 
 		tti->inc_age();
@@ -167,6 +164,9 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 		int think_time = json_integer_value(json_object_get(json_in, "think_time")) * 0.9;
 		int depth = json_integer_value(json_object_get(json_in, "depth"));
 		int cluster_idx = json_integer_value(json_object_get(json_in, "idx"));
+
+		if (pp)
+			stop_ponder(pp);
 
 		result_t r = lazy_smp_search(cluster_idx, tti, n_threads, pos, think_time, depth);
 

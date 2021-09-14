@@ -439,12 +439,12 @@ libchess::Move pick_one(libchess::Position & pos)
 	return alt_list[rand() % move_list.size()];
 }
 
-bool time_management(int depth, std::chrono::time_point<std::chrono::system_clock> start_ts, int think_time, bool terminate_flag)
+bool time_management(int depth, std::chrono::time_point<std::chrono::system_clock> start_ts, int think_time, bool terminate_flag, bool is_thread)
 {
 	auto time_used_chrono = std::chrono::system_clock::now() - start_ts;
 	uint64_t time_used_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_used_chrono).count();
 
-	if (terminate_flag || (think_time > 0 && time_used_ms > think_time / 2)) {
+	if (terminate_flag || (think_time > 0 && time_used_ms > think_time / 2 && is_thread == false)) {
 		dolog("depth %d flag: %d think time: %d ms used: %ld ms", depth, terminate_flag, think_time, time_used_ms);
 		return true;
 	}
@@ -477,7 +477,7 @@ void search_it(std::vector<struct ponder_pars *> *td, int me, tt *tti, const int
 	for(;;) {
 		meta.max_depth = td->at(me)->depth;
 
-		if (time_management(td->at(me)->depth, start_ts, think_time, meta.ei->flag))
+		if (time_management(td->at(me)->depth, start_ts, think_time, meta.ei->flag, me != 0))
 			break;
 
 		libchess::Move cur_move;

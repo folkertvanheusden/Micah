@@ -531,7 +531,7 @@ void search_it(std::vector<struct ponder_pars *> *td, int me, tt *tti, const int
 				}
 			}
 
-			if (td->size() <= 3)
+			if (td->size() <= 3 || me == 0)
 				td->at(me)->depth++;
 			else {
 				for(;;) {

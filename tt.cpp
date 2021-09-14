@@ -115,8 +115,9 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 		copy.hash = hash;
 
 		pkts_lock.lock();
-		if (pkts.size() < MAX_BC_Q_SIZE)
-			pkts.push(copy);
+		while (pkts.size() > MAX_BC_Q_SIZE)
+			pkts.pop();  // forget old stuff
+		pkts.push(copy);
 		pkts_lock.unlock();
 
 		pkts_cv.notify_one();

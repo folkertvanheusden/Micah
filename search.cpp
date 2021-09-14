@@ -439,12 +439,12 @@ libchess::Move pick_one(libchess::Position & pos)
 	return alt_list[rand() % move_list.size()];
 }
 
-bool time_management(int depth, std::chrono::time_point<std::chrono::system_clock> start_ts, int think_time, bool terminate_flag, bool is_thread)
+bool time_management(int depth, std::chrono::time_point<std::chrono::system_clock> start_ts, int think_time, bool terminate_flag)
 {
 	auto time_used_chrono = std::chrono::system_clock::now() - start_ts;
 	uint64_t time_used_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_used_chrono).count();
 
-	if (terminate_flag || (think_time > 0 && time_used_ms > think_time / 2 && is_thread == false)) {
+	if (terminate_flag || (think_time > 0 && time_used_ms > think_time / 2)) {
 		dolog("depth %d flag: %d think time: %d ms used: %ld ms", depth, terminate_flag, think_time, time_used_ms);
 		return true;
 	}
@@ -477,7 +477,7 @@ void search_it(std::vector<struct ponder_pars *> *td, int me, tt *tti, const int
 	for(;;) {
 		meta.max_depth = td->at(me)->depth;
 
-		if (time_management(td->at(me)->depth, start_ts, think_time, meta.ei->flag, me != 0))
+		if (time_management(td->at(me)->depth, start_ts, think_time, meta.ei->flag))
 			break;
 
 		libchess::Move cur_move;
@@ -603,8 +603,19 @@ result_t lazy_smp_search(tt *tti, int n_threads, libchess::Position & pos, int t
 		}
 	}
 
+	bool first = true;
+
 	for(auto & t : td) {
 		t->join_thread->join();
+
+                if (first) {
+                        first = false;
+ 
+                        for(auto & t : td) {
+                                t->ei.flag = true;
+                                t->ei.cv.notify_all();
+                        }
+                }
 
 		if (t->result.depth >= r.depth && t->result.score >= r.score) {
 			r.depth = t->result.depth;

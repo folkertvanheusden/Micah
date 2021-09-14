@@ -16,7 +16,7 @@ typedef struct
 
 	tt *tti;
 
-	long int bco_1st_move, bco_total;
+	uint64_t bco_1st_move, bco_total, bco_index;
 
 	unsigned int hbt[2][64][64];
 } meta_t;

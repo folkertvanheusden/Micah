@@ -375,6 +375,7 @@ int search(libchess::Position & pos, int depth, int alpha, int beta, bool is_nul
 				if (score >= beta) {
 					meta->bco_1st_move += n_played == 1;
 					meta->bco_total++;
+					meta->bco_index += n_played;
 
 					if (!pos.is_capture_move(move))
 						meta -> hbt[pos.side_to_move()][move.from_square()][move.to_square()] += depth * depth;
@@ -456,7 +457,7 @@ void search_it(std::vector<struct ponder_pars *> *td, int me, tt *tti, const int
 	meta_t meta;
 	meta.ei = &td->at(me)->ei;
 	meta.node_count = 0;
-	meta.bco_1st_move = meta.bco_total = 0;
+	meta.bco_index = meta.bco_1st_move = meta.bco_total = 0;
 	meta.tti = tti;
 	memset(meta.hbt, 0x00, sizeof(meta.hbt));
 
@@ -559,8 +560,12 @@ void search_it(std::vector<struct ponder_pars *> *td, int me, tt *tti, const int
 	dolog("thread stops %d", me);
 
 #ifndef __ANDROID__
-	if (meta.bco_total && me == 0)
-		printf("info string beta cut-off after %f avg moves\n", meta.bco_1st_move / double(meta.bco_total));
+	if (meta.bco_total && me == 0) {
+		auto time_used_chrono = std::chrono::system_clock::now() - start_ts;
+		uint64_t time_used_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_used_chrono).count();
+
+		printf("info string beta cut-off after %f avg moves. # bco moves: %d, %% of total: %.2f%%, %f/s\n", meta.bco_index / double(meta.bco_total), meta.bco_total, meta.bco_total * 100.0 / meta.node_count, meta.bco_total * 1000.0 / time_used_ms);
+	}
 #endif
 
 	if (t) {

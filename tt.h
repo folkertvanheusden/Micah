@@ -9,6 +9,7 @@
 #define __PRAGMA_PACKED__ __attribute__ ((__packed__))
 
 #define BC_PORT 2318
+#define MAX_BC_Q_SIZE 1000
 
 typedef enum { NOTVALID = 0, EXACT = 1, LOWERBOUND = 2, UPPERBOUND = 3 } tt_entry_flag;
 
@@ -64,5 +65,5 @@ public:
 	void resize(size_t size_in_bytes);
 
 	std::optional<tt_entry> lookup(const uint64_t board_hash);
-	void store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m);
+	void store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool emit = true);
 };

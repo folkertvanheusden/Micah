@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <cstring>
+#include <netdb.h>
 #include <poll.h>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -60,7 +61,7 @@ std::optional<tt_entry> tt::lookup(const uint64_t hash)
 	return { };
 }
 
-void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m)
+void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool emit)
 {
 	unsigned long int index = hash % n_entries; // FIXME is biased at the bottom of the list
 
@@ -109,9 +110,10 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 	cur -> hash = hash ^ n.data;
 	cur -> data_.data = n.data;
 
-	if (f == EXACT) {
+	if (f == EXACT && emit) {
 		pkts_lock.lock();
-		pkts.push(*cur);
+		if (pkts.size() < MAX_BC_Q_SIZE)
+			pkts.push(*cur);
 		pkts_lock.unlock();
 
 		pkts_cv.notify_one();
@@ -189,14 +191,21 @@ void tt::cluster_rx()
 		}
 
 		if (fds[0].revents) {
+			struct sockaddr addr { 0 };
+			socklen_t a_len = sizeof addr;
 			tt_entry pkt;
 
-			if (recv(fd, &pkt, sizeof pkt, 0) == -1)
-				perror("recv");
+			if (recvfrom(fd, &pkt, sizeof pkt, 0, &addr, &a_len) == -1)
+				perror("recvfrom");
 
-			printf("hier %ld\n", pkt.hash);
+			/*
+			char hbuf[128] { 0 };
+			getnameinfo(&addr, a_len, hbuf, sizeof(hbuf), nullptr, 0, NI_NUMERICHOST | NI_NUMERICSERV);
 
-			store(pkt.hash, tt_entry_flag(pkt.data_._data.flags), pkt.data_._data.depth, pkt.data_._data.score, libchess::Move(pkt.data_._data.m));
+			printf("hier %ld\t%s\n", (long unsigned int)pkt.hash, hbuf);
+			*/
+
+			store(pkt.hash, tt_entry_flag(pkt.data_._data.flags), pkt.data_._data.depth, pkt.data_._data.score, libchess::Move(pkt.data_._data.m), false);
 		}
 	}
 

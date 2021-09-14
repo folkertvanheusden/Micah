@@ -1,12 +1,21 @@
 #include <cstdlib>
 #include <cstring>
+#include <poll.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include "libchess/Position.h"
 #include "tt.h"
+#include "utils.h"
 
-tt::tt(size_t size_in_bytes) : entries(nullptr)
+tt::tt(size_t size_in_bytes)
 {
 	resize(size_in_bytes);
+
+	th = new std::thread(&tt::cluster_tx, this);
+	th2 = new std::thread(&tt::cluster_rx, this);
 }
 
 tt::~tt()
@@ -20,8 +29,8 @@ void tt::resize(size_t size_in_bytes)
 		delete [] entries;
 
 	n_entries = size_in_bytes / sizeof(tt_hash_group);
-	entries = new tt_hash_group[n_entries];
-	memset(entries, 0x00, sizeof(tt_hash_group) * n_entries);
+
+	entries = new tt_hash_group[n_entries]();
 
 	age = 0;
 }
@@ -99,4 +108,97 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 
 	cur -> hash = hash ^ n.data;
 	cur -> data_.data = n.data;
+
+	if (f == EXACT) {
+		pkts_lock.lock();
+		pkts.push(*cur);
+		pkts_lock.unlock();
+
+		pkts_cv.notify_one();
+	}
+}
+
+int create_bc_socket(const bool b)
+{
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+	int enable = 1;
+	if (setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &enable, sizeof enable) == -1)
+		dolog("setsockopt(SO_BROADCAST) failed: %s", strerror(errno));
+
+	if (b) {
+		struct sockaddr_in addr { 0 };
+		addr.sin_family = AF_INET;
+		addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		addr.sin_port = htons(BC_PORT);
+
+		if (bind(fd, (struct sockaddr *)&addr, sizeof addr) == -1)
+			dolog("bind() failed: %s", strerror(errno));
+	}
+
+	return fd;
+}
+
+void broadcast_tx(const int fd, const uint8_t *msg, const size_t len)
+{
+	struct sockaddr_in s { 0 };
+
+	s.sin_family = AF_INET;
+	s.sin_port = htons(BC_PORT);
+	s.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+	if (sendto(fd, msg, len, 0, (struct sockaddr *)&s, sizeof(struct sockaddr_in)) == -1)
+		dolog("sendto() failed: %s", strerror(errno));
+}
+
+void tt::cluster_tx()
+{
+	int fd = create_bc_socket(false);
+
+	for(;!stop_flag;) {
+                std::unique_lock<std::mutex> lck(pkts_lock);
+
+                using namespace std::chrono_literals;
+
+                while(pkts.empty() && !stop_flag)
+                        pkts_cv.wait_for(lck, 500ms);
+
+                if (pkts.empty() || stop_flag)
+                        continue;
+
+                const tt_entry pkt = pkts.front();
+                pkts.pop();
+
+                lck.unlock();
+
+		broadcast_tx(fd, (uint8_t *)&pkt, sizeof pkt);
+	}
+
+	close(fd);
+}
+
+void tt::cluster_rx()
+{
+	int fd = create_bc_socket(true);
+	struct pollfd fds[] = { { fd, POLLIN, 0 } };
+
+	for(;!stop_flag;) {
+		if (poll(fds, 1, 500) == -1) {
+			perror("poll");
+			break;
+		}
+
+		if (fds[0].revents) {
+			tt_entry pkt;
+
+			if (recv(fd, &pkt, sizeof pkt, 0) == -1)
+				perror("recv");
+
+			printf("hier %ld\n", pkt.hash);
+
+			store(pkt.hash, tt_entry_flag(pkt.data_._data.flags), pkt.data_._data.depth, pkt.data_._data.score, libchess::Move(pkt.data_._data.m));
+		}
+	}
+
+	close(fd);
 }

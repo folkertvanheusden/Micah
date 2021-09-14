@@ -1,6 +1,14 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <thread>
+
 #define __PRAGMA_PACKED__ __attribute__ ((__packed__))
+
+#define BC_PORT 2318
 
 typedef enum { NOTVALID = 0, EXACT = 1, LOWERBOUND = 2, UPPERBOUND = 3 } tt_entry_flag;
 
@@ -31,10 +39,21 @@ typedef struct __PRAGMA_PACKED__
 class tt
 {
 private:
-	tt_hash_group *entries;
-	uint64_t n_entries;
+	std::thread *th { nullptr };
+	std::thread *th2 { nullptr };
+	std::atomic_bool stop_flag { false };
 
-	int age;
+        std::mutex pkts_lock;
+        std::condition_variable pkts_cv;
+        std::queue<tt_entry> pkts;
+
+	tt_hash_group *entries { nullptr };
+	uint64_t n_entries { 0 };
+
+	int age { 0 };
+
+	void cluster_tx();
+	void cluster_rx();
 
 public:
 	tt(size_t size_in_bytes);

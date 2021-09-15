@@ -306,16 +306,18 @@ void cluster_receive_results(const int fd, const std::vector<std::string> *const
 				std::string move = json_string_value(json_object_get(json_in, "move"));
 				int depth = json_integer_value(json_object_get(json_in, "depth"));
 				int score = json_integer_value(json_object_get(json_in, "score"));
+				int node_count = json_integer_value(json_object_get(json_in, "node-count"));
 
 				result_t r;
-				r.m     = libchess::Move::from(move).value();
-				r.depth = depth;
-				r.score = score;
+				r.m          = libchess::Move::from(move).value();
+				r.depth      = depth;
+				r.score      = score;
+				r.node_count = node_count;
 
 				results->push_back(r);
 			}
 			else {
-				fprintf(stderr, "Unexpected FEN\n");
+				dolog("Unexpected (%s) FEN (%s)\n", recv_pos.c_str(), compare_pos.c_str());
 			}
 
 			json_decref(json_in);

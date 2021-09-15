@@ -25,6 +25,7 @@ typedef struct
 {
 	libchess::Move m;
 	int depth, score;
+	long int node_count;
 } result_t;
 
 int qs(libchess::Position & pos, int alpha, int beta, meta_t *meta, int qsdepth, libchess::Move *m, eval_par & pars = default_parameters);

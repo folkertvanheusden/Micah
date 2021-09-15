@@ -56,7 +56,9 @@ private:
 	int age { 0 };
 
 	std::atomic<std::uint64_t> remote_counts[2] { 0, 0 };
-	std::atomic<std::uint64_t> n_store { 0 }, rstore { 0 }, rstore_full { 0 };
+	std::atomic<std::uint64_t> n_store { 0 }, rstore { 0 }, rstore_full { 0 }, n_lookup { 0 };
+	std::atomic<std::uint64_t> store_tt_per_flag[4] { 0, 0, 0, 0 };
+	std::atomic<std::uint64_t> lu_tt_per_flag[4] { 0, 0, 0, 0 };
 
 	void cluster_tx();
 	void cluster_rx();

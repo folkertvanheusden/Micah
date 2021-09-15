@@ -39,6 +39,11 @@ void tt::resize(size_t size_in_bytes)
 void tt::inc_age()
 {
 	age++;
+
+	remote_counts[0] = remote_counts[1] = 0;
+	n_store = rstore = rstore_full = n_lookup = 0;
+	store_tt_per_flag[0] = store_tt_per_flag[1] = store_tt_per_flag[2] = store_tt_per_flag[3] = 0;
+	lu_tt_per_flag[0] = lu_tt_per_flag[1] = lu_tt_per_flag[2] = lu_tt_per_flag[3] = 0;
 }
 
 std::optional<tt_entry> tt::lookup(const uint64_t hash)
@@ -46,6 +51,8 @@ std::optional<tt_entry> tt::lookup(const uint64_t hash)
 	uint64_t index = hash % n_entries;
 
 	tt_entry *const e = entries[index].entries;
+
+	n_lookup++;
 
 	for(int i=0; i<N_TE_PER_HASH_GROUP; i++) {
 		tt_entry *const cur = &e[i];
@@ -55,6 +62,7 @@ std::optional<tt_entry> tt::lookup(const uint64_t hash)
 			cur->hash = hash ^ cur->data_.data;
 
 			remote_counts[cur->data_._data.is_remote]++;
+			lu_tt_per_flag[cur->data_._data.flags]++;
 
 			return *cur;
 		}
@@ -114,6 +122,8 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 	cur -> data_.data = n.data;
 
 	n_store++;
+
+	store_tt_per_flag[f]++;
 
 	if (f == EXACT && emit) {
 		rstore++;
@@ -222,11 +232,19 @@ json_t *tt::get_stats()
 {
 	json_t *obj = json_object();
 
-	json_object_set(obj, "tt-lookups", json_integer(remote_counts[0] + remote_counts[1]));
+	json_object_set(obj, "tt-lookups", json_integer(n_lookup));
+	json_object_set(obj, "tt-lu-local", json_integer(remote_counts[0]));
 	json_object_set(obj, "tt-lu-remote", json_integer(remote_counts[1]));
+	json_object_set(obj, "tt-lu-exact", json_integer(lu_tt_per_flag[EXACT]));
+	json_object_set(obj, "tt-lu-lb", json_integer(lu_tt_per_flag[LOWERBOUND]));
+	json_object_set(obj, "tt-lu-ub", json_integer(lu_tt_per_flag[UPPERBOUND]));
+
 	json_object_set(obj, "tt-store", json_integer(n_store));
 	json_object_set(obj, "tt-rstore", json_integer(rstore));
 	json_object_set(obj, "tt-rstore-full", json_integer(rstore_full));
+	json_object_set(obj, "tt-store-exact", json_integer(store_tt_per_flag[EXACT]));
+	json_object_set(obj, "tt-store-lb", json_integer(store_tt_per_flag[LOWERBOUND]));
+	json_object_set(obj, "tt-store-ub", json_integer(store_tt_per_flag[UPPERBOUND]));
 
 	return obj;
 }

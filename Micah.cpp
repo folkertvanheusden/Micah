@@ -178,6 +178,7 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 		json_object_set(json_out, "move", json_string(r.m.to_str().c_str()));
 		json_object_set(json_out, "depth", json_integer(r.depth));
 		json_object_set(json_out, "score", json_integer(r.score));
+		json_object_set(json_out, "node-count", json_integer(r.node_count));
 
 		json_object_set(json_out, "tt-stats", tti->get_stats());
 

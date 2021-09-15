@@ -595,7 +595,7 @@ result_t lazy_smp_search(int cluster_idx, tt *tti, int n_threads, libchess::Posi
 	for(int i=0; i<n_threads; i++)
 		td.at(i)->join_thread = new std::thread(search_it, &td, i, tti, think_time, max_depth);
 
-	result_t r{ { }, -1, -32767 };
+	result_t r{ { }, -1, -32767, 0 };
 
 	std::optional<libchess::Move> syzygy_move = probe_fathom(pos);
 
@@ -620,6 +620,8 @@ result_t lazy_smp_search(int cluster_idx, tt *tti, int n_threads, libchess::Posi
                                 t->ei.cv.notify_all();
                         }
                 }
+
+		r.node_count += t->result.node_count;
 
 		if (t->result.depth >= r.depth && t->result.score >= r.score) {
 			r.depth = t->result.depth;

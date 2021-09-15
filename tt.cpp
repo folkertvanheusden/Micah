@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <cstring>
+#include <math.h>
 #include <netdb.h>
 #include <poll.h>
 #include <unistd.h>
@@ -39,6 +40,7 @@ void tt::resize(size_t size_in_bytes)
 void tt::inc_age()
 {
 	age++;
+	total_d = 0;
 
 	remote_counts[0] = remote_counts[1] = 0;
 	n_store = rstore = rstore_full = n_lookup = 0;
@@ -76,7 +78,12 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 {
 	unsigned long int index = hash % n_entries; // FIXME is biased at the bottom of the list
 
-	tt_entry *const e = entries[index].entries;
+	n_store++;
+	total_d += d;
+	store_tt_per_flag[f]++;
+
+	tt_entry *const e = entries[index].entries, *cur = nullptr;
+	tt_entry::u n;
 
 	int useSubIndex = -1, minDepth = 999, mdi = -1;
 
@@ -87,13 +94,15 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 				e[i].data_._data.age = age;
 				e[i].data_._data.is_remote = is_remote;
 				e[i].hash = hash ^ e[i].data_.data;
-				return;
+				cur = &e[i];
+				goto finish;
 			}
 			if (f!=EXACT && e[i].data_._data.depth==d) {
 				e[i].data_._data.age = age;
 				e[i].data_._data.is_remote = is_remote;
 				e[i].hash = hash ^ e[i].data_.data;
-				return;
+				cur = &e[i];
+				goto finish;
 			}
 
 			useSubIndex = i;
@@ -112,8 +121,7 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 	if (useSubIndex == -1)
 		useSubIndex = mdi;
 
-	tt_entry *const cur = &e[useSubIndex];
-	tt_entry::u n;
+	cur = &e[useSubIndex];
 	n._data.score = int16_t(score);
 	n._data.depth = uint8_t(d);
 	n._data.is_remote = is_remote;
@@ -124,25 +132,24 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 	cur -> hash = hash ^ n.data;
 	cur -> data_.data = n.data;
 
-	n_store++;
-
-	store_tt_per_flag[f]++;
-
-	if (f == EXACT && !is_remote) {
+finish:
+	if (d >= total_d / n_store && !is_remote) {
 		rstore++;
 
 		tt_entry copy = *cur;
 		copy.hash = hash;
 
 		pkts_lock.lock();
+
 		while (pkts.size() > MAX_BC_Q_SIZE) {
 			pkts.pop();  // forget old stuff
 			rstore_full++;
 		}
 		pkts.push(std::pair<uint64_t, tt_entry>(get_us(), copy));
-		pkts_lock.unlock();
 
 		pkts_cv.notify_one();
+
+		pkts_lock.unlock();
 	}
 }
 

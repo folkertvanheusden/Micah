@@ -54,6 +54,7 @@ private:
 	uint64_t n_entries { 0 };
 
 	int age { 0 };
+	std::atomic_uint32_t total_d { 0 };
 
 	std::atomic<std::uint64_t> remote_counts[2] { 0, 0 }, n_send_remote { 0 }, total_send_time { 0 };
 	std::atomic<std::uint64_t> n_store { 0 }, rstore { 0 }, rstore_full { 0 }, n_lookup { 0 };

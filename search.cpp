@@ -404,8 +404,7 @@ int search(int cluster_idx, libchess::Position & pos, int depth, int alpha, int 
 		else if (best_score >= beta)
 			flag = LOWERBOUND;
 
-		meta->tti->store(hash, flag, depth, best_score, 
-				best_score > start_alpha || tt_move.value() == 0 ? best_move : tt_move);
+		meta->tti->store(hash, flag, depth, best_score, best_score > start_alpha || tt_move.value() == 0 ? best_move : tt_move, false);
 	}
 
 	return best_score;

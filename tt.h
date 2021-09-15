@@ -48,14 +48,14 @@ private:
 
         std::mutex pkts_lock;
         std::condition_variable pkts_cv;
-        std::queue<tt_entry> pkts;
+        std::queue<std::pair<uint64_t, tt_entry> > pkts;
 
 	tt_hash_group *entries { nullptr };
 	uint64_t n_entries { 0 };
 
 	int age { 0 };
 
-	std::atomic<std::uint64_t> remote_counts[2] { 0, 0 };
+	std::atomic<std::uint64_t> remote_counts[2] { 0, 0 }, n_send_remote { 0 }, total_send_time { 0 };
 	std::atomic<std::uint64_t> n_store { 0 }, rstore { 0 }, rstore_full { 0 }, n_lookup { 0 };
 	std::atomic<std::uint64_t> store_tt_per_flag[4] { 0, 0, 0, 0 };
 	std::atomic<std::uint64_t> lu_tt_per_flag[4] { 0, 0, 0, 0 };
@@ -74,5 +74,5 @@ public:
 	void resize(size_t size_in_bytes);
 
 	std::optional<tt_entry> lookup(const uint64_t board_hash);
-	void store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool emit = true, const bool is_remote = false);
+	void store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool is_remote);
 };

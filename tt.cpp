@@ -44,6 +44,7 @@ void tt::inc_age()
 	n_store = rstore = rstore_full = n_lookup = 0;
 	store_tt_per_flag[0] = store_tt_per_flag[1] = store_tt_per_flag[2] = store_tt_per_flag[3] = 0;
 	lu_tt_per_flag[0] = lu_tt_per_flag[1] = lu_tt_per_flag[2] = lu_tt_per_flag[3] = 0;
+	n_send_remote = total_send_time = 0;
 }
 
 std::optional<tt_entry> tt::lookup(const uint64_t hash)
@@ -71,7 +72,7 @@ std::optional<tt_entry> tt::lookup(const uint64_t hash)
 	return { };
 }
 
-void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool emit, const bool is_remote)
+void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool is_remote)
 {
 	unsigned long int index = hash % n_entries; // FIXME is biased at the bottom of the list
 
@@ -84,11 +85,13 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 		if ((e[i].hash ^ e[i].data_.data) == hash) {
 			if (e[i].data_._data.depth > d) {
 				e[i].data_._data.age = age;
+				e[i].data_._data.is_remote = is_remote;
 				e[i].hash = hash ^ e[i].data_.data;
 				return;
 			}
 			if (f!=EXACT && e[i].data_._data.depth==d) {
 				e[i].data_._data.age = age;
+				e[i].data_._data.is_remote = is_remote;
 				e[i].hash = hash ^ e[i].data_.data;
 				return;
 			}
@@ -98,7 +101,7 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 			break;
 		}
 
-		if (e[i].data_._data.age != age)
+		if (e[i].data_._data.age != age && !is_remote)
 			useSubIndex = i;
 		else if (e[i].data_._data.depth < minDepth) {
 			minDepth = e[i].data_._data.depth;
@@ -125,7 +128,7 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 
 	store_tt_per_flag[f]++;
 
-	if (f == EXACT && emit) {
+	if (f == EXACT && !is_remote) {
 		rstore++;
 
 		tt_entry copy = *cur;
@@ -136,7 +139,7 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 			pkts.pop();  // forget old stuff
 			rstore_full++;
 		}
-		pkts.push(copy);
+		pkts.push(std::pair<uint64_t, tt_entry>(get_us(), copy));
 		pkts_lock.unlock();
 
 		pkts_cv.notify_one();
@@ -185,18 +188,23 @@ void tt::cluster_tx()
 
                 using namespace std::chrono_literals;
 
-                while(pkts.empty() && !stop_flag)
-                        pkts_cv.wait_for(lck, 500ms);
+		while(pkts.empty() && !stop_flag)
+			pkts_cv.wait_for(lck, 500ms);
 
-                if (pkts.empty() || stop_flag)
-                        continue;
+		if (pkts.empty() || stop_flag)
+			continue;
 
-                const tt_entry pkt = pkts.front();
-                pkts.pop();
+		auto entry = pkts.front();
+		pkts.pop();
 
-                lck.unlock();
+		lck.unlock();
+
+                const tt_entry pkt = entry.second;
 
 		broadcast_tx(fd, (uint8_t *)&pkt, sizeof pkt);
+
+		n_send_remote++;
+		total_send_time += get_us() - entry.first;
 	}
 
 	close(fd);
@@ -221,7 +229,7 @@ void tt::cluster_rx()
 			if (recvfrom(fd, &pkt, sizeof pkt, 0, &addr, &a_len) == -1)
 				perror("recvfrom");
 
-			store(pkt.hash, tt_entry_flag(pkt.data_._data.flags), pkt.data_._data.depth, pkt.data_._data.score, libchess::Move(pkt.data_._data.m), false, true);
+			store(pkt.hash, tt_entry_flag(pkt.data_._data.flags), pkt.data_._data.depth, pkt.data_._data.score, libchess::Move(pkt.data_._data.m), true);
 		}
 	}
 
@@ -245,6 +253,9 @@ json_t *tt::get_stats()
 	json_object_set(obj, "tt-store-exact", json_integer(store_tt_per_flag[EXACT]));
 	json_object_set(obj, "tt-store-lb", json_integer(store_tt_per_flag[LOWERBOUND]));
 	json_object_set(obj, "tt-store-ub", json_integer(store_tt_per_flag[UPPERBOUND]));
+
+	json_object_set(obj, "n-send-remote", json_integer(n_send_remote));
+	json_object_set(obj, "total-send-time", json_integer(total_send_time));
 
 	return obj;
 }

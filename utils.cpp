@@ -216,8 +216,18 @@ libchess::Move find_pv_move_by_hash(std::vector<pv_entry_t> & pv, uint64_t hash)
 
 uint64_t get_ts_ms()
 {
-	struct timeval tv;
-	gettimeofday(&tv, nullptr);
+	struct timespec ts;
 
-	return tv.tv_sec * 1000ll + tv.tv_usec / 1000;
+	clock_gettime(CLOCK_REALTIME, &ts);
+
+	return ts.tv_sec * 1000ll + ts.tv_nsec / (1000 * 1000);
+}
+
+uint64_t get_us()
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+
+	return uint64_t(ts.tv_sec) * uint64_t(1000 * 1000) + ts.tv_nsec / 1000;
 }

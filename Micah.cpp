@@ -663,20 +663,21 @@ int main(int argc, char** argv)
 			}
 
 			// find result with best values (depth & score)
-			result_t final_r { { }, -1, -32767 };
+			result_t final_r { { }, -1, -32767, 0 };
 
 			size_t chosen = 0;
 			for(size_t i=0; i<results.size(); i++) {
 				if (results.at(i).depth >= final_r.depth && results.at(i).score >= final_r.score) {
-					final_r.depth = results.at(i).depth;
-					final_r.score = results.at(i).score;
-					final_r.m     = results.at(i).m;
+					final_r.depth      = results.at(i).depth;
+					final_r.score      = results.at(i).score;
+					final_r.m          = results.at(i).m;
+					final_r.node_count = results.at(i).node_count;
 					chosen = i;
 				}
 			}
 
 			printf("bestmove %s\n", move_to_str(final_r.m).c_str());
-			dolog("bestmove %s (idx: %zu, depth: %d, score: %d, took: %ld)", move_to_str(final_r.m).c_str(), chosen, final_r.depth, final_r.score, get_ts_ms() - start);
+			dolog("bestmove %s (idx: %zu, depth: %d, score: %d, took: %lld, node count: %lu)", move_to_str(final_r.m).c_str(), chosen, final_r.depth, final_r.score, (long long int)(get_ts_ms() - start), final_r.node_count);
 
 			if (go_ponder) {
 				pp = ponder(&tti, *p, n_threads);

@@ -274,6 +274,7 @@ void cluster_receive_results(const int fd, const std::vector<std::string> *const
 		socklen_t addrlen = sizeof src_addr;
 
 		int t_left = end - get_ts_ms();
+		printf("# %zu nodes left, %dms\n", nodes->size() - i, t_left);
 		int rc = poll(fds, 1, t_left > 0 ? t_left : 0);
 		if (rc == -1) {
 			dolog("poll failed: %s", strerror(errno));

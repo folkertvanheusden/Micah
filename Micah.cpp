@@ -280,6 +280,11 @@ void cluster_receive_results(const int fd, const std::vector<std::string> *const
 			break;
 		}
 
+		if (rc == 0) {
+			dolog("poll timeout!");
+			break;
+		}
+
 		char buffer[1500];
 		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
 		if (len <= 0)

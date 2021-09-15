@@ -280,42 +280,45 @@ void cluster_receive_results(const int fd, const std::vector<std::string> *const
 			break;
 		}
 
-		if (rc == 0) {
+		if (rc == 0 && t_left <= 0) {
 			dolog("poll timeout!");
+			printf("# poll timeout!\n");
 			break;
 		}
 
-		char buffer[1500];
-		int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
-		if (len <= 0)
-			continue;
-		buffer[len] = 0x00;
+		if (fds[0].revents) {
+			char buffer[1500];
+			int len = recvfrom(fd, buffer, sizeof buffer - 1, 0, &src_addr, &addrlen);
+			if (len <= 0)
+				continue;
+			buffer[len] = 0x00;
 
-		const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
-		dolog("received results from [%s]:%d: %s", inet_ntoa(a->sin_addr), ntohs(a->sin_port), buffer);
+			const struct sockaddr_in *a = (const struct sockaddr_in *)&src_addr;
+			dolog("received results from [%s]:%d: %s", inet_ntoa(a->sin_addr), ntohs(a->sin_port), buffer);
 
-		json_error_t error { 0 };
-		json_t *json_in = json_loads(buffer, 0, &error);
+			json_error_t error { 0 };
+			json_t *json_in = json_loads(buffer, 0, &error);
 
-		std::string recv_pos = json_string_value(json_object_get(json_in, "position"));
+			std::string recv_pos = json_string_value(json_object_get(json_in, "position"));
 
-		if (recv_pos == compare_pos) {
-			std::string move = json_string_value(json_object_get(json_in, "move"));
-			int depth = json_integer_value(json_object_get(json_in, "depth"));
-			int score = json_integer_value(json_object_get(json_in, "score"));
+			if (recv_pos == compare_pos) {
+				std::string move = json_string_value(json_object_get(json_in, "move"));
+				int depth = json_integer_value(json_object_get(json_in, "depth"));
+				int score = json_integer_value(json_object_get(json_in, "score"));
 
-			result_t r;
-			r.m     = libchess::Move::from(move).value();
-			r.depth = depth;
-			r.score = score;
+				result_t r;
+				r.m     = libchess::Move::from(move).value();
+				r.depth = depth;
+				r.score = score;
 
-			results->push_back(r);
+				results->push_back(r);
+			}
+			else {
+				fprintf(stderr, "Unexpected FEN\n");
+			}
+
+			json_decref(json_in);
 		}
-		else {
-			fprintf(stderr, "Unexpected FEN\n");
-		}
-
-		json_decref(json_in);
 	}
 }
 

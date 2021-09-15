@@ -54,6 +54,8 @@ std::optional<tt_entry> tt::lookup(const uint64_t hash)
 			cur->data_._data.age = age;
 			cur->hash = hash ^ cur->data_.data;
 
+			remote_counts[cur->data_._data.is_remote]++;
+
 			return *cur;
 		}
 	}
@@ -61,7 +63,7 @@ std::optional<tt_entry> tt::lookup(const uint64_t hash)
 	return { };
 }
 
-void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool emit)
+void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool emit, const bool is_remote)
 {
 	unsigned long int index = hash % n_entries; // FIXME is biased at the bottom of the list
 
@@ -103,6 +105,7 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 	tt_entry::u n;
 	n._data.score = int16_t(score);
 	n._data.depth = uint8_t(d);
+	n._data.is_remote = is_remote;
 	n._data.flags = f;
 	n._data.age = age;
 	n._data.m = m.value();
@@ -110,13 +113,19 @@ void tt::store(const uint64_t hash, const tt_entry_flag f, const int d, const in
 	cur -> hash = hash ^ n.data;
 	cur -> data_.data = n.data;
 
+	n_store++;
+
 	if (f == EXACT && emit) {
+		rstore++;
+
 		tt_entry copy = *cur;
 		copy.hash = hash;
 
 		pkts_lock.lock();
-		while (pkts.size() > MAX_BC_Q_SIZE)
+		while (pkts.size() > MAX_BC_Q_SIZE) {
 			pkts.pop();  // forget old stuff
+			rstore_full++;
+		}
 		pkts.push(copy);
 		pkts_lock.unlock();
 
@@ -202,16 +211,22 @@ void tt::cluster_rx()
 			if (recvfrom(fd, &pkt, sizeof pkt, 0, &addr, &a_len) == -1)
 				perror("recvfrom");
 
-			/*
-			char hbuf[128] { 0 };
-			getnameinfo(&addr, a_len, hbuf, sizeof(hbuf), nullptr, 0, NI_NUMERICHOST | NI_NUMERICSERV);
-
-			printf("hier %ld\t%s\n", (long unsigned int)pkt.hash, hbuf);
-			*/
-
-			store(pkt.hash, tt_entry_flag(pkt.data_._data.flags), pkt.data_._data.depth, pkt.data_._data.score, libchess::Move(pkt.data_._data.m), false);
+			store(pkt.hash, tt_entry_flag(pkt.data_._data.flags), pkt.data_._data.depth, pkt.data_._data.score, libchess::Move(pkt.data_._data.m), false, true);
 		}
 	}
 
 	close(fd);
+}
+
+json_t *tt::get_stats()
+{
+	json_t *obj = json_object();
+
+	json_object_set(obj, "tt-lookups", json_integer(remote_counts[0] + remote_counts[1]));
+	json_object_set(obj, "tt-lu-remote", json_integer(remote_counts[1]));
+	json_object_set(obj, "tt-store", json_integer(n_store));
+	json_object_set(obj, "tt-rstore", json_integer(rstore));
+	json_object_set(obj, "tt-rstore-full", json_integer(rstore_full));
+
+	return obj;
 }

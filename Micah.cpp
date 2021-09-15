@@ -179,6 +179,8 @@ void cluster_node(tt *const tti, const int n_threads, const int port)
 		json_object_set(json_out, "depth", json_integer(r.depth));
 		json_object_set(json_out, "score", json_integer(r.score));
 
+		json_object_set(json_out, "tt-stats", tti->get_stats());
+
 		const char *json = json_dumps(json_out, JSON_COMPACT);
 		size_t json_len = strlen(json);
 

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <jansson.h>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -22,7 +23,8 @@ typedef struct __PRAGMA_PACKED__
                         int16_t score;
                         uint8_t flags : 2;
                         uint8_t age : 6;
-                        uint8_t depth : 8;
+                        uint8_t depth : 7;
+			uint8_t is_remote: 1;
                         uint32_t m;
                 } _data;
 
@@ -53,6 +55,9 @@ private:
 
 	int age { 0 };
 
+	std::atomic<std::uint64_t> remote_counts[2] { 0, 0 };
+	std::atomic<std::uint64_t> n_store { 0 }, rstore { 0 }, rstore_full { 0 };
+
 	void cluster_tx();
 	void cluster_rx();
 
@@ -62,8 +67,10 @@ public:
 
 	void inc_age();
 
+	json_t *get_stats();
+
 	void resize(size_t size_in_bytes);
 
 	std::optional<tt_entry> lookup(const uint64_t board_hash);
-	void store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool emit = true);
+	void store(const uint64_t hash, const tt_entry_flag f, const int d, const int score, const libchess::Move & m, const bool emit = true, const bool is_remote = false);
 };

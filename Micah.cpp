@@ -642,6 +642,8 @@ int main(int argc, char** argv)
 
 			tti.inc_age();
 
+			uint64_t start = get_ts_ms();
+
 			cluster_send_requests(include_local, fd, nodes, *p, think_time, depth);
 			
 			std::vector<result_t> results;
@@ -671,7 +673,7 @@ int main(int argc, char** argv)
 			}
 
 			printf("bestmove %s\n", move_to_str(final_r.m).c_str());
-			dolog("bestmove %s (idx: %zu, depth: %d, score: %d)", move_to_str(final_r.m).c_str(), chosen, final_r.depth, final_r.score);
+			dolog("bestmove %s (idx: %zu, depth: %d, score: %d, took: %ld)", move_to_str(final_r.m).c_str(), chosen, final_r.depth, final_r.score, get_ts_ms() - start);
 
 			if (go_ponder) {
 				pp = ponder(&tti, *p, n_threads);

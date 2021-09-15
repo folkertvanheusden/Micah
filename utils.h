@@ -21,3 +21,4 @@ libchess::Move find_pv_move_by_hash(std::vector<pv_entry_t> & pv, uint64_t hash)
 std::string move_to_str(const libchess::Move & cur_move);
 
 uint64_t get_ts_ms();
+uint64_t get_us();

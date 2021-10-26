@@ -262,20 +262,18 @@ int search(libchess::Position & pos, int depth, int alpha, int beta, bool is_nul
 	}
 	////////
 
-	if (!is_root_position) {
+	if (!is_root_position && depth <= 3 && beta <= 9800) {
 		int staticeval = eval(pos, default_parameters);
 
 		// static null pruning (reverse futility pruning)
-		if (beta <= 9800) {
-			if (depth == 1 && staticeval - default_parameters.tune_knight.value() > beta)
-				return beta;
+		if (depth == 1 && staticeval - default_parameters.tune_knight.value() > beta)
+			return beta;
 
-			if (depth == 2 && staticeval - default_parameters.tune_rook.value() > beta)
-				return beta;
+		if (depth == 2 && staticeval - default_parameters.tune_rook.value() > beta)
+			return beta;
 
-			if (depth == 3 && staticeval - default_parameters.tune_queen.value() > beta)
-				depth--;
-		}
+		if (depth == 3 && staticeval - default_parameters.tune_queen.value() > beta)
+			depth--;
 	}
 
 	int extension = in_check;

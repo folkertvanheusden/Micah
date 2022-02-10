@@ -1,6 +1,10 @@
 project(Micah)
 cmake_minimum_required(VERSION 3.2)
-add_definitions("-std=gnu++17 -Wall")
+
+add_definitions("-Wall")
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(MICAH_VERSION 2.0)
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVERSION=\"\\\"${MICAH_VERSION}\\\"\"")
